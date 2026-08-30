@@ -53,7 +53,10 @@ func TestCrawl(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	pages, err := Crawl(srv.URL, srv.Client())
+	cfg := Config{
+		Client: srv.Client(),
+	}
+	pages, err := Crawl(srv.URL, cfg)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

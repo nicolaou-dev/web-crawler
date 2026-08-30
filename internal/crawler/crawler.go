@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -15,15 +16,29 @@ type Page struct {
 	Links []*url.URL
 }
 
-func Crawl(seed string, client *http.Client) ([]Page, error) {
+type Config struct {
+	Client *http.Client
+	Logger *slog.Logger
+}
+
+func Crawl(seed string, cfg Config) ([]Page, error) {
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+
 	seedURL, err := url.Parse(seed)
 	if err != nil {
+		cfg.Logger.Error("invalid seed url", "seed", seed, "err", err)
 		return nil, err
 	}
 
 	seedURL = canonical(seedURL)
 
+	cfg.Logger.Info("crawl started", "seed", seedURL.String())
+	start := time.Now()
+
 	var pages []Page
+	var failures int
 	queue := []*url.URL{seedURL}
 	seen := map[string]struct{}{}
 	seen[seedURL.String()] = struct{}{}
@@ -32,9 +47,12 @@ func Crawl(seed string, client *http.Client) ([]Page, error) {
 		pageURL := queue[0]
 		queue = queue[1:]
 
-		links, err := fetchAndParse(client, pageURL)
+		cfg.Logger.Debug("fetching", "url", pageURL.String())
+		links, err := fetchAndParse(cfg.Client, pageURL)
 
 		if err != nil {
+			failures++
+			cfg.Logger.Warn("fetch failed", "url", pageURL.String(), "err", err)
 			continue
 		}
 
@@ -47,7 +65,7 @@ func Crawl(seed string, client *http.Client) ([]Page, error) {
 
 			linkURLs = append(linkURLs, link)
 
-			// If it's external we don't want to crawl it, so skip adding it to the queu
+			// If it's external we don't want to crawl it, so skip adding it to the queue
 			if link.Host != seedURL.Host {
 				continue
 			}
@@ -61,9 +79,16 @@ func Crawl(seed string, client *http.Client) ([]Page, error) {
 			queue = append(queue, link)
 		}
 
+		cfg.Logger.Debug("page crawled", "url", pageURL.String(), "links", len(linkURLs))
 		pages = append(pages, Page{URL: pageURL, Links: linkURLs})
 
 	}
+
+	cfg.Logger.Info("crawl finished",
+		"pages", len(pages),
+		"failures", failures,
+		"duration", time.Since(start),
+	)
 
 	return pages, nil
 }
