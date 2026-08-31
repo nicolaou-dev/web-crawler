@@ -95,3 +95,32 @@ func TestCrawl(t *testing.T) {
 		t.Errorf("crawl mismatch (-want +got):\n%s", diff)
 	}
 }
+
+// Test infinite site (/page/N links to /page/N+1 forever) terminates when
+// max budget is set
+func TestCrawlMaxTerminates(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		n := 0
+		fmt.Sscanf(r.URL.Path, "/page/%d", &n)
+		fmt.Fprintf(w, `<a href="/page/%d">next</a>`, n+1)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cfg := Config{
+		Client: srv.Client(),
+		Max:    10,
+	}
+	seed, _ := url.Parse(srv.URL)
+
+	pages := 0
+	for range NewCrawler(cfg, seed).Run() {
+		pages++
+	}
+
+	if pages != 10 {
+		t.Errorf("crawled %d pages, want 10 (Max budget)", pages)
+	}
+}

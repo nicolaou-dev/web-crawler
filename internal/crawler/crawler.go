@@ -22,6 +22,7 @@ type Config struct {
 	Client  *http.Client
 	Logger  *slog.Logger
 	Workers int
+	Max     int
 }
 
 type Crawler struct {
@@ -38,7 +39,7 @@ func NewCrawler(cfg Config, seed *url.URL) *Crawler {
 		cfg.Workers = 10
 	}
 	seed = canonical(seed)
-	f := frontier.NewFrontier()
+	f := frontier.NewFrontier(cfg.Max)
 	return &Crawler{
 		cfg:  cfg,
 		seed: seed,

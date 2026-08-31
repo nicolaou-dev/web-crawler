@@ -37,7 +37,7 @@ func drain(f *Frontier) (int, map[string]int) {
 
 // Enqueuing the same URL concurrently accepts and processes it only once.
 func TestConcurrentEnqueueDedups(t *testing.T) {
-	f := NewFrontier()
+	f := NewFrontier(0)
 	u := mustURL("http://example.com/a")
 
 	var wg sync.WaitGroup
@@ -53,7 +53,7 @@ func TestConcurrentEnqueueDedups(t *testing.T) {
 
 // Enqueuing distinct URLs concurrently processes all of them.
 func TestConcurrentEnqueueLosesNothing(t *testing.T) {
-	f := NewFrontier()
+	f := NewFrontier(0)
 
 	var wg sync.WaitGroup
 	for i := range 100 {
@@ -68,7 +68,7 @@ func TestConcurrentEnqueueLosesNothing(t *testing.T) {
 
 // A URL that has already been enqueued is not enqueued again.
 func TestDuplicateIgnored(t *testing.T) {
-	f := NewFrontier()
+	f := NewFrontier(0)
 	u := mustURL("http://example.com/a")
 
 	f.Enqueue(Task{URL: u})
@@ -82,7 +82,7 @@ func TestDuplicateIgnored(t *testing.T) {
 // Tasks enqueued while other tasks are being processed are handled, and the
 // frontier still terminates.
 func TestEnqueueDuringProcessingTerminates(t *testing.T) {
-	f := NewFrontier()
+	f := NewFrontier(0)
 	root := mustURL("http://example.com/root")
 	f.Enqueue(Task{URL: root})
 
@@ -102,9 +102,23 @@ func TestEnqueueDuringProcessingTerminates(t *testing.T) {
 	}
 }
 
+func TestMaxBudget(t *testing.T) {
+	f := NewFrontier(50)
+
+	for i := range 100 {
+		u := mustURL(fmt.Sprintf("http://example.com/page/%d", i))
+		f.Enqueue(Task{URL: u})
+	}
+
+	if got, _ := drain(f); got != 50 {
+		t.Errorf("processed %d tasks, want 50", got)
+	}
+
+}
+
 // Fail counts the failure and still lets the frontier terminate.
 func TestFailCountsAndTerminates(t *testing.T) {
-	f := NewFrontier()
+	f := NewFrontier(0)
 	f.Enqueue(Task{URL: mustURL("http://example.com/a")})
 	f.Enqueue(Task{URL: mustURL("http://example.com/b")})
 
@@ -117,7 +131,7 @@ func TestFailCountsAndTerminates(t *testing.T) {
 
 // A mix of Ack and Fail counts only the failures and still terminates.
 func TestMixedAckFail(t *testing.T) {
-	f := NewFrontier()
+	f := NewFrontier(0)
 	f.Enqueue(Task{URL: mustURL("http://example.com/ok")})
 	f.Enqueue(Task{URL: mustURL("http://example.com/bad")})
 

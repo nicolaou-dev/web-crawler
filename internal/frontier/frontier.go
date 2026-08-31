@@ -14,21 +14,29 @@ type Frontier struct {
 	wg       sync.WaitGroup
 	mu       sync.Mutex
 	seen     map[string]bool
+	max      int
 	failures int
 }
 
-func NewFrontier() *Frontier { return &Frontier{ch: make(chan Task), seen: make(map[string]bool)} }
+func NewFrontier(max int) *Frontier {
+	return &Frontier{ch: make(chan Task), seen: make(map[string]bool), max: max}
+}
 
 func (f *Frontier) Enqueue(t Task) {
+	defer f.mu.Unlock()
 	key := t.URL.String()
 	f.mu.Lock()
 	if f.seen[key] {
-		f.mu.Unlock()
+		return
+	}
+	// When set f.max the frontier accepts up to the f.max number of distinct urls.
+	// If not set it's unlimited
+	if f.max > 0 && len(f.seen) >= f.max {
 		return
 	}
 	f.seen[key] = true
-	f.mu.Unlock()
 	f.wg.Add(1)
+
 	go func() { f.ch <- t }()
 }
 
