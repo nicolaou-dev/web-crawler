@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"testing"
 
@@ -56,19 +57,21 @@ func TestCrawl(t *testing.T) {
 	cfg := Config{
 		Client: srv.Client(),
 	}
-	pages, err := Crawl(srv.URL, cfg)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	seed, _ := url.Parse(srv.URL)
+	var pages []Page
+	for p := range NewCrawler(cfg, seed).Run() {
+		pages = append(pages, p)
 	}
 
 	want := map[string][]string{
 		srv.URL + "/": {
+			srv.URL + "/",
 			srv.URL + "/about",
 			"https://facebook.com",
 			"https://twitter.com"},
 		srv.URL + "/about": {
 			srv.URL + "/",
+			srv.URL + "/about",
 			"https://facebook.com",
 			"https://twitter.com",
 		},

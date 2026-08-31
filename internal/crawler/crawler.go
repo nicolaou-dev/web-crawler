@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/nicolaou-dev/web-crawler/internal/fetcher"
+	"github.com/nicolaou-dev/web-crawler/internal/frontier"
 	"github.com/nicolaou-dev/web-crawler/internal/parser"
+	"github.com/nicolaou-dev/web-crawler/internal/pool"
 )
 
 type Page struct {
@@ -17,80 +19,83 @@ type Page struct {
 }
 
 type Config struct {
-	Client *http.Client
-	Logger *slog.Logger
+	Client  *http.Client
+	Logger  *slog.Logger
+	Workers int
 }
 
-func Crawl(seed string, cfg Config) ([]Page, error) {
+type Crawler struct {
+	cfg  Config
+	seed *url.URL
+	f    *frontier.Frontier
+}
+
+func NewCrawler(cfg Config, seed *url.URL) *Crawler {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.Workers <= 0 {
+		cfg.Workers = 10
+	}
+	seed = canonical(seed)
+	f := frontier.NewFrontier()
+	return &Crawler{
+		cfg:  cfg,
+		seed: seed,
+		f:    f,
+	}
+}
 
-	seedURL, err := url.Parse(seed)
+func (c *Crawler) Run() <-chan Page {
+	c.cfg.Logger.Info("crawl started", "seed", c.seed.String())
+
+	results := make(chan Page)
+
+	go func() {
+		defer close(results)
+		c.f.Enqueue(frontier.Task{URL: c.seed})
+		c.f.Watch()
+		pool.Run(c.cfg.Workers, c.f.Tasks(), func(t frontier.Task) {
+			if p, ok := c.process(t); ok {
+				results <- p
+			}
+		})
+	}()
+
+	return results
+}
+
+func (c *Crawler) Failures() int { return c.f.Failures() }
+
+func (c *Crawler) process(t frontier.Task) (Page, bool) {
+	c.cfg.Logger.Debug("fetching", "url", t.URL.String())
+	links, err := fetchAndParse(c.cfg.Client, t.URL)
+
 	if err != nil {
-		cfg.Logger.Error("invalid seed url", "seed", seed, "err", err)
-		return nil, err
+		c.cfg.Logger.Warn("fetch failed", "url", t.URL.String(), "err", err)
+		c.f.Fail()
+		return Page{}, false
 	}
 
-	seedURL = canonical(seedURL)
-
-	cfg.Logger.Info("crawl started", "seed", seedURL.String())
-	start := time.Now()
-
-	var pages []Page
-	var failures int
-	queue := []*url.URL{seedURL}
-	seen := map[string]struct{}{}
-	seen[seedURL.String()] = struct{}{}
-
-	for len(queue) > 0 {
-		pageURL := queue[0]
-		queue = queue[1:]
-
-		cfg.Logger.Debug("fetching", "url", pageURL.String())
-		links, err := fetchAndParse(cfg.Client, pageURL)
-
-		if err != nil {
-			failures++
-			cfg.Logger.Warn("fetch failed", "url", pageURL.String(), "err", err)
-			continue
+	for _, l := range links {
+		if inScope(l, c.seed) {
+			c.f.Enqueue(frontier.Task{URL: l})
 		}
-
-		var linkURLs []*url.URL
-
-		for _, link := range links {
-			if link.String() == pageURL.String() {
-				continue // skip self-links
-			}
-
-			linkURLs = append(linkURLs, link)
-
-			// If it's external we don't want to crawl it, so skip adding it to the queue
-			if link.Host != seedURL.Host {
-				continue
-			}
-
-			key := link.String()
-			if _, ok := seen[key]; ok {
-				continue
-			}
-
-			seen[key] = struct{}{}
-			queue = append(queue, link)
-		}
-
-		cfg.Logger.Debug("page crawled", "url", pageURL.String(), "links", len(linkURLs))
-		pages = append(pages, Page{URL: pageURL, Links: linkURLs})
-
 	}
 
-	cfg.Logger.Info("crawl finished",
-		"pages", len(pages),
-		"failures", failures,
-		"duration", time.Since(start),
-	)
+	c.cfg.Logger.Debug("page crawled", "url", t.URL.String(), "links", len(links))
+	c.f.Ack()
+	return Page{URL: t.URL, Links: links}, true
+}
 
-	return pages, nil
+func inScope(link *url.URL, seed *url.URL) bool {
+	// If it's external we don't want to crawl it
+	if link.Host != seed.Host {
+		return false
+	}
+
+	return true
+
 }
 
 func fetchAndParse(client *http.Client, pageURL *url.URL) ([]*url.URL, error) {
@@ -104,7 +109,6 @@ func fetchAndParse(client *http.Client, pageURL *url.URL) ([]*url.URL, error) {
 	defer body.Close()
 
 	return parser.ParseLinks(body, pageURL)
-
 }
 
 func canonical(u *url.URL) *url.URL {
