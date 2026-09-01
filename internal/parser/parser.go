@@ -29,7 +29,6 @@ func ParseLinks(body io.Reader, base *url.URL) (links []*url.URL, err error) {
 	}
 
 	return links, nil
-
 }
 
 // Relative urls -> absolute urls. /about -> https://books.toscrape.com/about

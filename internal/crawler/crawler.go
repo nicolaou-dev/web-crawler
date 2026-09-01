@@ -71,10 +71,13 @@ func (c *Crawler) Pages(ctx context.Context) iter.Seq[Page] {
 }
 
 func (c *Crawler) run(ctx context.Context) <-chan Page {
+	// Trigger cleanup if context was cancelled
 	context.AfterFunc(ctx, c.f.Close)
 
 	results := make(chan Page)
 
+	// Use a goroutine so we don't block on pool.Run
+	// and can return results
 	go func() {
 		defer close(results)
 		pool.Run(c.cfg.Workers, c.f.Next, func(t frontier.Task) {
@@ -106,6 +109,9 @@ func (c *Crawler) process(ctx context.Context, t frontier.Task) (Page, bool) {
 		return Page{URL: t.URL, Err: err}, true
 	}
 
+	// Enqueue page links before Ack, to ensure links are added
+	// to the crawl before it terminates. Ack first might terminate
+	// the crawl if this was the last page
 	for _, l := range links {
 		cu := frontier.Canonical(l)
 		if c.cfg.AllowList[cu.Host] {
@@ -123,6 +129,8 @@ func fetchAndParse(ctx context.Context, client *http.Client, limiter *rate.Limit
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	// TODO: Check redirects. The client could follow a redirect to a domain
+	// that is not in AllowList
 	status, body, err := fetcher.Fetch(ctx, client, limiter, pageURL.String())
 	if err != nil {
 		return nil, err
@@ -136,5 +144,7 @@ func fetchAndParse(ctx context.Context, client *http.Client, limiter *rate.Limit
 		return nil, fmt.Errorf("unexpected status %d", status)
 	}
 
+	// TODO: Skip parsing for non-html pages (fetcher.Fetch would need to expose content type)
+	// && cap size of body reading (prevents OOM)
 	return parser.ParseLinks(body, pageURL)
 }

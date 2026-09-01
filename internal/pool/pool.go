@@ -18,5 +18,6 @@ func Run[T any](n int, next func() (T, bool), handle func(T)) {
 			}
 		})
 	}
+	// Wait for all workers to finish before returning
 	wg.Wait()
 }

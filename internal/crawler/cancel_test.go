@@ -54,8 +54,11 @@ func TestCancelStopsPromptlyWithNoLeaks(t *testing.T) {
 
 	select {
 	case <-done:
+	// If context cancelling is not wired correctly the crawler will keep going on
+	// forever given the infinite site.
+	// 1 second is plenty of time to ensure context cancel stops the crawler and cleans up
 	case <-time.After(1 * time.Second):
-		t.Fatal("Pages did not return prompty after ctx cancel")
+		t.Fatal("Pages did not return promptly after ctx cancel")
 	}
 }
 
@@ -84,7 +87,7 @@ func TestEarlyBreakNoLeak(t *testing.T) {
 	}, f)
 
 	for range c.Pages(context.Background()) {
-		break // this should trigget defer cancel() inside Pages iter
+		break // this should trigger defer cancel() inside Pages iter
 	}
 
 	// goleak will verify if shutdown was graceful with no leaks

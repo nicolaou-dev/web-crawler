@@ -137,6 +137,7 @@ func TestCrawlNon2xxIsFailure(t *testing.T) {
 		fmt.Fprint(w, `<p>ok</p>`)
 	})
 	mux.HandleFunc("/bad", func(w http.ResponseWriter, r *http.Request) {
+		// Return status 500 so /bad is logged as a failure
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, `<a href="/should-not-follow">trap</a>`)
 	})

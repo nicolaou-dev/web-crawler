@@ -21,7 +21,7 @@ const (
 	// maxPages bounds the total number of pages crawled.
 	maxPages = 500
 
-	// Sets the number of workers, controls concurency
+	// Sets the number of workers, controls concurrency
 	workers = 5
 
 	delay = 20 * time.Millisecond
@@ -38,14 +38,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// TODO: Read robots.txt to set Delay and allow list
 	config := crawler.Config{
 		Client:  client,
 		Logger:  logger,
 		Workers: workers,
 		Delay:   delay,
 		AllowList: map[string]bool{
-			seedURL.Host:          true,
-			"www." + seedURL.Host: true,
+			seedURL.Host: true,
 		},
 	}
 
@@ -62,9 +62,12 @@ func main() {
 	// kill -9
 	go func() { <-ctx.Done(); stop() }()
 
+	// TODO: Use a durable frontier (e.g. redis)
 	f := frontier.NewInMemory(seedURL, maxPages)
 	defer f.Close()
 
+	// TODO: With a durable frontier, introduce pause/resume of crawl
+	// using run-id. It's a no-op for in-memory
 	c := crawler.NewCrawler(config, f)
 
 	logger.Info("crawl started", "seed", seedURL.String())
