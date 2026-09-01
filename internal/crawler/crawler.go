@@ -39,7 +39,6 @@ func NewCrawler(cfg Config, seed *url.URL) *Crawler {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 10
 	}
-	seed = canonical(seed)
 	f := frontier.NewFrontier(cfg.Max)
 	return &Crawler{
 		cfg:  cfg,
@@ -116,11 +115,4 @@ func fetchAndParse(client *http.Client, pageURL *url.URL) ([]*url.URL, error) {
 	}
 
 	return parser.ParseLinks(body, pageURL)
-}
-
-func canonical(u *url.URL) *url.URL {
-	if u.Path == "" {
-		u.Path = "/"
-	}
-	return u
 }

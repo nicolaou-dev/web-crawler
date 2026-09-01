@@ -147,3 +147,25 @@ func TestMixedAckFail(t *testing.T) {
 		t.Errorf("failures = %d, want 1", got)
 	}
 }
+
+func TestEnqueueCanonicalizesDedup(t *testing.T) {
+	f := NewFrontier(0)
+	u1, _ := url.Parse("https://books.toscrape.com")
+	u2, _ := url.Parse("https://books.toscrape.com/")
+	f.Enqueue(Task{URL: u1})
+	f.Enqueue(Task{URL: u2})
+
+	got, counts := drain(f)
+
+	if got != 1 {
+		t.Errorf("process %d tasks, want 1 (canonical dedup)", got)
+	}
+
+	if counts["https://books.toscrape.com/"] != 1 {
+		t.Errorf("counts = %v, want single https://books.toscrape.com", counts)
+	}
+
+	if u1.Path != "" {
+		t.Errorf("caller URL mutated: path=%q", u1.Path)
+	}
+}

@@ -23,12 +23,17 @@ func NewFrontier(max int) *Frontier {
 }
 
 func (f *Frontier) Enqueue(t Task) {
-	defer f.mu.Unlock()
-	key := t.URL.String()
+	u := canonical(t.URL)
+	t.URL = u
+	key := u.String()
+
 	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	if f.seen[key] {
 		return
 	}
+
 	// When set f.max the frontier accepts up to the f.max number of distinct urls.
 	// If not set it's unlimited
 	if f.max > 0 && len(f.seen) >= f.max {
@@ -43,5 +48,15 @@ func (f *Frontier) Enqueue(t Task) {
 func (f *Frontier) Ack()               { f.wg.Done() }
 func (f *Frontier) Fail()              { f.wg.Done(); f.mu.Lock(); f.failures++; f.mu.Unlock() }
 func (f *Frontier) Tasks() <-chan Task { return f.ch }
-func (f *Frontier) Failures() int      { return f.failures }
-func (f *Frontier) Watch()             { go func() { f.wg.Wait(); close(f.ch) }() }
+func (f *Frontier) Failures() int      { f.mu.Lock(); defer f.mu.Unlock(); return f.failures }
+
+// Wait for the frontier to finish with all work then close the channel
+func (f *Frontier) Watch() { go func() { f.wg.Wait(); close(f.ch) }() }
+
+func canonical(u *url.URL) *url.URL {
+	c := *u
+	if c.Path == "" {
+		c.Path = "/"
+	}
+	return &c
+}
