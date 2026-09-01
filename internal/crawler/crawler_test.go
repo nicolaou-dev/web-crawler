@@ -124,3 +124,36 @@ func TestCrawlMaxTerminates(t *testing.T) {
 		t.Errorf("crawled %d pages, want 10 (Max budget)", pages)
 	}
 }
+
+func TestCrawlNon2xxIsFailure(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/good">good</a><a href="/bad">bad</a>`)
+	})
+	mux.HandleFunc("/good", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<p>ok</p>`)
+	})
+	mux.HandleFunc("/bad", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `<a href="/should-not-follow">trap</a>`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	seed, _ := url.Parse(srv.URL)
+
+	c := NewCrawler(Config{Client: srv.Client()}, seed)
+
+	var emitted []string
+	for p := range c.Run() {
+		emitted = append(emitted, p.URL.String())
+	}
+
+	if c.Failures() != 1 {
+		t.Errorf("failures = %d, want 1", c.Failures())
+	}
+
+	if len(emitted) != 2 {
+		t.Errorf("emitted %v, want root + /good only", emitted)
+	}
+}

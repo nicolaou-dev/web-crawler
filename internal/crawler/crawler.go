@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -54,6 +55,7 @@ func (c *Crawler) Run() <-chan Page {
 
 	go func() {
 		defer close(results)
+		// Add the seed url so we can start the crawl
 		c.f.Enqueue(frontier.Task{URL: c.seed})
 		c.f.Watch()
 		pool.Run(c.cfg.Workers, c.f.Tasks(), func(t frontier.Task) {
@@ -103,11 +105,15 @@ func fetchAndParse(client *http.Client, pageURL *url.URL) ([]*url.URL, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, body, err := fetcher.Fetch(ctx, client, pageURL.String())
+	status, body, err := fetcher.Fetch(ctx, client, pageURL.String())
 	if err != nil {
 		return nil, err
 	}
 	defer body.Close()
+
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("unexpected status %d", status)
+	}
 
 	return parser.ParseLinks(body, pageURL)
 }
