@@ -12,6 +12,7 @@ import (
 	"github.com/nicolaou-dev/web-crawler/internal/frontier"
 	"github.com/nicolaou-dev/web-crawler/internal/parser"
 	"github.com/nicolaou-dev/web-crawler/internal/pool"
+	"golang.org/x/time/rate"
 )
 
 type Page struct {
@@ -24,12 +25,14 @@ type Config struct {
 	Logger  *slog.Logger
 	Workers int
 	Max     int
+	Delay   time.Duration
 }
 
 type Crawler struct {
-	cfg  Config
-	seed *url.URL
-	f    *frontier.Frontier
+	cfg     Config
+	seed    *url.URL
+	f       *frontier.Frontier
+	limiter *rate.Limiter
 }
 
 func NewCrawler(cfg Config, seed *url.URL) *Crawler {
@@ -39,11 +42,19 @@ func NewCrawler(cfg Config, seed *url.URL) *Crawler {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 10
 	}
+	if cfg.Delay <= 0 {
+		cfg.Delay = 20 * time.Millisecond
+	}
+
 	f := frontier.NewFrontier(cfg.Max)
+
+	limiter := rate.NewLimiter(rate.Every(cfg.Delay), 1)
+
 	return &Crawler{
-		cfg:  cfg,
-		seed: seed,
-		f:    f,
+		cfg:     cfg,
+		seed:    seed,
+		f:       f,
+		limiter: limiter,
 	}
 }
 
@@ -71,7 +82,7 @@ func (c *Crawler) Failures() int { return c.f.Failures() }
 
 func (c *Crawler) process(t frontier.Task) (Page, bool) {
 	c.cfg.Logger.Debug("fetching", "url", t.URL.String())
-	links, err := fetchAndParse(c.cfg.Client, t.URL)
+	links, err := fetchAndParse(c.cfg.Client, c.limiter, t.URL)
 
 	if err != nil {
 		c.cfg.Logger.Warn("fetch failed", "url", t.URL.String(), "err", err)
@@ -100,11 +111,11 @@ func inScope(link *url.URL, seed *url.URL) bool {
 
 }
 
-func fetchAndParse(client *http.Client, pageURL *url.URL) ([]*url.URL, error) {
+func fetchAndParse(client *http.Client, limiter *rate.Limiter, pageURL *url.URL) ([]*url.URL, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	status, body, err := fetcher.Fetch(ctx, client, pageURL.String())
+	status, body, err := fetcher.Fetch(ctx, client, limiter, pageURL.String())
 	if err != nil {
 		return nil, err
 	}

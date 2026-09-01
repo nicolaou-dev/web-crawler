@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"golang.org/x/time/rate"
 )
 
 func TestFetch(t *testing.T) {
@@ -15,7 +17,7 @@ func TestFetch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	status, body, err := Fetch(context.Background(), srv.Client(), srv.URL)
+	status, body, err := Fetch(context.Background(), srv.Client(), rate.NewLimiter(rate.Inf, 1), srv.URL)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -42,7 +44,7 @@ func TestFetchReturnsNon2xxStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	status, body, err := Fetch(context.Background(), srv.Client(), srv.URL)
+	status, body, err := Fetch(context.Background(), srv.Client(), rate.NewLimiter(rate.Inf, 1), srv.URL)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -62,7 +64,7 @@ func TestFetchTransportErr(t *testing.T) {
 	// Kill server so fetch fails
 	srv.Close()
 
-	status, body, err := Fetch(context.Background(), &http.Client{}, srv.URL)
+	status, body, err := Fetch(context.Background(), srv.Client(), rate.NewLimiter(rate.Inf, 1), srv.URL)
 
 	if err == nil {
 		t.Fatalf("expected an error, got nil")

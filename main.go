@@ -20,6 +20,8 @@ const (
 
 	// Sets the number of workers, controls concurency
 	workers = 5
+
+	delay = 20 * time.Millisecond
 )
 
 func main() {
@@ -33,7 +35,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	c := crawler.NewCrawler(crawler.Config{Client: client, Logger: logger, Workers: workers, Max: maxPages}, seedURL)
+	config := crawler.Config{
+		Client:  client,
+		Logger:  logger,
+		Workers: workers,
+		Max:     maxPages,
+		Delay:   delay,
+	}
+
+	c := crawler.NewCrawler(config, seedURL)
 
 	start := time.Now()
 	pages := 0
