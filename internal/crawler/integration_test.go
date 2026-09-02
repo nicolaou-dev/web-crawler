@@ -3,8 +3,10 @@
 package crawler
 
 import (
+	"context"
 	"net/http"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 )
@@ -29,10 +31,7 @@ func TestCrawlLiveSite(t *testing.T) {
 		Delay:   100 * time.Millisecond, // Be polite: at least 100 ms between successive requests = 10 req/s
 	}, seed)
 
-	var pages []Page
-	for p := range c.Run() {
-		pages = append(pages, p)
-	}
+	pages := slices.Collect(c.Pages(context.Background()))
 
 	// crawled something, and respected the budget
 	if len(pages) == 0 {

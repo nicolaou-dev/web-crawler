@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -57,11 +58,10 @@ func TestCrawl(t *testing.T) {
 	cfg := Config{
 		Client: srv.Client(),
 	}
+
 	seed, _ := url.Parse(srv.URL)
-	var pages []Page
-	for p := range NewCrawler(cfg, seed).Run() {
-		pages = append(pages, p)
-	}
+	c := NewCrawler(cfg, seed)
+	pages := slices.Collect(c.Pages(context.Background()))
 
 	want := map[string][]string{
 		srv.URL + "/": {
@@ -115,13 +115,11 @@ func TestCrawlMaxTerminates(t *testing.T) {
 	}
 	seed, _ := url.Parse(srv.URL)
 
-	pages := 0
-	for range NewCrawler(cfg, seed).Run() {
-		pages++
-	}
+	c := NewCrawler(cfg, seed)
+	pages := slices.Collect(c.Pages(context.Background()))
 
-	if pages != 10 {
-		t.Errorf("crawled %d pages, want 10 (Max budget)", pages)
+	if len(pages) != 10 {
+		t.Errorf("crawled %d pages, want 10 (Max budget)", len(pages))
 	}
 }
 
@@ -143,17 +141,13 @@ func TestCrawlNon2xxIsFailure(t *testing.T) {
 	seed, _ := url.Parse(srv.URL)
 
 	c := NewCrawler(Config{Client: srv.Client()}, seed)
-
-	var emitted []string
-	for p := range c.Run() {
-		emitted = append(emitted, p.URL.String())
-	}
+	pages := slices.Collect(c.Pages(context.Background()))
 
 	if c.Failures() != 1 {
 		t.Errorf("failures = %d, want 1", c.Failures())
 	}
 
-	if len(emitted) != 2 {
-		t.Errorf("emitted %v, want root + /good only", emitted)
+	if len(pages) != 2 {
+		t.Errorf("emitted %v, want root + /good only", pages)
 	}
 }

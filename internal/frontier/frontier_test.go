@@ -1,6 +1,7 @@
 package frontier
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"sync"
@@ -42,7 +43,7 @@ func TestConcurrentEnqueueDedups(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 100 {
-		wg.Go(func() { f.Enqueue(Task{URL: u}) })
+		wg.Go(func() { f.Enqueue(context.Background(), Task{URL: u}) })
 	}
 	wg.Wait()
 
@@ -57,7 +58,7 @@ func TestConcurrentEnqueueLosesNothing(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 100 {
-		wg.Go(func() { f.Enqueue(Task{URL: mustURL(fmt.Sprintf("http://example.com/%d", i))}) })
+		wg.Go(func() { f.Enqueue(context.Background(), Task{URL: mustURL(fmt.Sprintf("http://example.com/%d", i))}) })
 	}
 	wg.Wait()
 
@@ -71,8 +72,8 @@ func TestDuplicateIgnored(t *testing.T) {
 	f := NewFrontier(0)
 	u := mustURL("http://example.com/a")
 
-	f.Enqueue(Task{URL: u})
-	f.Enqueue(Task{URL: u})
+	f.Enqueue(context.Background(), Task{URL: u})
+	f.Enqueue(context.Background(), Task{URL: u})
 
 	if got, _ := drain(f); got != 1 {
 		t.Errorf("processed %d tasks, want 1", got)
@@ -84,13 +85,13 @@ func TestDuplicateIgnored(t *testing.T) {
 func TestEnqueueDuringProcessingTerminates(t *testing.T) {
 	f := NewFrontier(0)
 	root := mustURL("http://example.com/root")
-	f.Enqueue(Task{URL: root})
+	f.Enqueue(context.Background(), Task{URL: root})
 
 	processed := 0
 	consume(f, func(t Task) {
 		if t.URL.String() == root.String() {
 			for j := range 3 {
-				f.Enqueue(Task{URL: mustURL(fmt.Sprintf("http://example.com/child-%d", j))})
+				f.Enqueue(context.Background(), Task{URL: mustURL(fmt.Sprintf("http://example.com/child-%d", j))})
 			}
 		}
 		processed++
@@ -107,7 +108,7 @@ func TestMaxBudget(t *testing.T) {
 
 	for i := range 100 {
 		u := mustURL(fmt.Sprintf("http://example.com/page/%d", i))
-		f.Enqueue(Task{URL: u})
+		f.Enqueue(context.Background(), Task{URL: u})
 	}
 
 	if got, _ := drain(f); got != 50 {
@@ -119,8 +120,8 @@ func TestMaxBudget(t *testing.T) {
 // Fail counts the failure and still lets the frontier terminate.
 func TestFailCountsAndTerminates(t *testing.T) {
 	f := NewFrontier(0)
-	f.Enqueue(Task{URL: mustURL("http://example.com/a")})
-	f.Enqueue(Task{URL: mustURL("http://example.com/b")})
+	f.Enqueue(context.Background(), Task{URL: mustURL("http://example.com/a")})
+	f.Enqueue(context.Background(), Task{URL: mustURL("http://example.com/b")})
 
 	consume(f, func(t Task) { f.Fail() })
 
@@ -132,8 +133,8 @@ func TestFailCountsAndTerminates(t *testing.T) {
 // A mix of Ack and Fail counts only the failures and still terminates.
 func TestMixedAckFail(t *testing.T) {
 	f := NewFrontier(0)
-	f.Enqueue(Task{URL: mustURL("http://example.com/ok")})
-	f.Enqueue(Task{URL: mustURL("http://example.com/bad")})
+	f.Enqueue(context.Background(), Task{URL: mustURL("http://example.com/ok")})
+	f.Enqueue(context.Background(), Task{URL: mustURL("http://example.com/bad")})
 
 	consume(f, func(t Task) {
 		if t.URL.Path == "/bad" {
@@ -152,8 +153,8 @@ func TestEnqueueCanonicalizesDedup(t *testing.T) {
 	f := NewFrontier(0)
 	u1, _ := url.Parse("https://books.toscrape.com")
 	u2, _ := url.Parse("https://books.toscrape.com/")
-	f.Enqueue(Task{URL: u1})
-	f.Enqueue(Task{URL: u2})
+	f.Enqueue(context.Background(), Task{URL: u1})
+	f.Enqueue(context.Background(), Task{URL: u2})
 
 	got, counts := drain(f)
 

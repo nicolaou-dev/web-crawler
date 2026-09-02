@@ -3,6 +3,7 @@ package crawler
 import (
 	"context"
 	"fmt"
+	"iter"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -58,7 +59,20 @@ func NewCrawler(cfg Config, seed *url.URL) *Crawler {
 	}
 }
 
-func (c *Crawler) Run() <-chan Page {
+func (c *Crawler) Pages(ctx context.Context) iter.Seq[Page] {
+	return func(yield func(Page) bool) {
+		// On break, cancel the context to trigger the cleanup
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		for p := range c.run(ctx) {
+			if !yield(p) {
+				return
+			}
+		}
+	}
+}
+
+func (c *Crawler) run(ctx context.Context) <-chan Page {
 	c.cfg.Logger.Info("crawl started", "seed", c.seed.String())
 
 	results := make(chan Page)
@@ -66,11 +80,17 @@ func (c *Crawler) Run() <-chan Page {
 	go func() {
 		defer close(results)
 		// Add the seed url so we can start the crawl
-		c.f.Enqueue(frontier.Task{URL: c.seed})
+		c.f.Enqueue(ctx, frontier.Task{URL: c.seed})
 		c.f.Watch()
-		pool.Run(c.cfg.Workers, c.f.Tasks(), func(t frontier.Task) {
-			if p, ok := c.process(t); ok {
-				results <- p
+		pool.Run(ctx, c.cfg.Workers, c.f.Tasks(), func(t frontier.Task) {
+			if p, ok := c.process(ctx, t); ok {
+				// If the context is cancelled stop pushing processed tasks.
+				// The consumer stopped receiving from results, so send
+				// would block forever
+				select {
+				case results <- p:
+				case <-ctx.Done():
+				}
 			}
 		})
 	}()
@@ -80,9 +100,9 @@ func (c *Crawler) Run() <-chan Page {
 
 func (c *Crawler) Failures() int { return c.f.Failures() }
 
-func (c *Crawler) process(t frontier.Task) (Page, bool) {
+func (c *Crawler) process(ctx context.Context, t frontier.Task) (Page, bool) {
 	c.cfg.Logger.Debug("fetching", "url", t.URL.String())
-	links, err := fetchAndParse(c.cfg.Client, c.limiter, t.URL)
+	links, err := fetchAndParse(ctx, c.cfg.Client, c.limiter, t.URL)
 
 	if err != nil {
 		c.cfg.Logger.Warn("fetch failed", "url", t.URL.String(), "err", err)
@@ -92,7 +112,7 @@ func (c *Crawler) process(t frontier.Task) (Page, bool) {
 
 	for _, l := range links {
 		if inScope(l, c.seed) {
-			c.f.Enqueue(frontier.Task{URL: l})
+			c.f.Enqueue(ctx, frontier.Task{URL: l})
 		}
 	}
 
@@ -111,8 +131,8 @@ func inScope(link *url.URL, seed *url.URL) bool {
 
 }
 
-func fetchAndParse(client *http.Client, limiter *rate.Limiter, pageURL *url.URL) ([]*url.URL, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func fetchAndParse(ctx context.Context, client *http.Client, limiter *rate.Limiter, pageURL *url.URL) ([]*url.URL, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	status, body, err := fetcher.Fetch(ctx, client, limiter, pageURL.String())
@@ -122,6 +142,9 @@ func fetchAndParse(client *http.Client, limiter *rate.Limiter, pageURL *url.URL)
 	defer body.Close()
 
 	if status < 200 || status >= 300 {
+		// Here would check if it's a transient error. If it is
+		// we would retry the task.
+		// After x retries, we would move the task to a DLQ
 		return nil, fmt.Errorf("unexpected status %d", status)
 	}
 

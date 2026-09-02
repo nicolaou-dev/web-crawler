@@ -1,10 +1,12 @@
 package crawler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 )
@@ -37,12 +39,10 @@ func TestCrawlRespectsRateLimit(t *testing.T) {
 	c := NewCrawler(Config{Client: srv.Client(), Workers: 10, Delay: 200 * time.Millisecond}, seed)
 
 	start := time.Now()
-	n := 0
-	for range c.Run() {
-		n++
-	}
+	pages := slices.Collect(c.Pages(context.Background()))
 	elapsed := time.Since(start)
 
+	n := len(pages)
 	if n != 10 {
 		t.Fatalf("crawled %d pages, want 10 (root + 9)", n)
 	}
