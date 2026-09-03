@@ -9,6 +9,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/nicolaou-dev/web-crawler/internal/frontier"
 )
 
 // Integration test — hits the live books.toscrape.com. It is network-dependent,
@@ -24,12 +26,15 @@ func TestCrawlLiveSite(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	f := frontier.NewInMemory(seed, 20) // bound the trap; keep the test quick
+	defer f.Close()
+
 	c := NewCrawler(Config{
-		Client:  &http.Client{Timeout: 15 * time.Second},
-		Workers: 5,
-		Max:     20,                     // bound the trap; keep the test quick
-		Delay:   100 * time.Millisecond, // Be polite: at least 100 ms between successive requests = 10 req/s
-	}, seed)
+		Client:    &http.Client{Timeout: 15 * time.Second},
+		Workers:   5,
+		Delay:     100 * time.Millisecond, // Be polite: >= 100 ms between requests = 10 req/s
+		AllowList: map[string]bool{seed.Host: true},
+	}, f)
 
 	pages := slices.Collect(c.Pages(context.Background()))
 
@@ -42,7 +47,11 @@ func TestCrawlLiveSite(t *testing.T) {
 	}
 
 	// core requirement: never leave the seed host
+	failures := 0
 	for _, p := range pages {
+		if p.Err != nil {
+			failures++
+		}
 		if p.URL.Host != seed.Host {
 			t.Errorf("visited off-host URL: %s", p.URL)
 		}
@@ -61,5 +70,5 @@ func TestCrawlLiveSite(t *testing.T) {
 		t.Errorf("homepage %s not visited", home)
 	}
 
-	t.Logf("crawled %d pages, failures=%d", len(pages), c.Failures())
+	t.Logf("crawled %d pages, failures=%d", len(pages), failures)
 }

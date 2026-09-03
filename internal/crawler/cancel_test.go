@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nicolaou-dev/web-crawler/internal/frontier"
 	"go.uber.org/goleak"
 )
 
@@ -29,11 +30,13 @@ func TestCancelStopsPromptlyWithNoLeaks(t *testing.T) {
 	seed, _ := url.Parse(srv.URL)
 	client := srv.Client()
 	client.Transport.(*http.Transport).DisableKeepAlives = true
+	f := frontier.NewInMemory(seed, 0)
 	c := NewCrawler(Config{
-		Client:  client,
-		Workers: 4,
-		Delay:   10 * time.Millisecond,
-	}, seed)
+		Client:    client,
+		Workers:   4,
+		Delay:     10 * time.Millisecond,
+		AllowList: map[string]bool{seed.Host: true},
+	}, f)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -72,11 +75,13 @@ func TestEarlyBreakNoLeak(t *testing.T) {
 	seed, _ := url.Parse(srv.URL)
 	client := srv.Client()
 	client.Transport.(*http.Transport).DisableKeepAlives = true
+	f := frontier.NewInMemory(seed, 0)
 	c := NewCrawler(Config{
-		Client:  client,
-		Workers: 4,
-		Delay:   10 * time.Millisecond,
-	}, seed)
+		Client:    client,
+		Workers:   4,
+		Delay:     10 * time.Millisecond,
+		AllowList: map[string]bool{seed.Host: true},
+	}, f)
 
 	for range c.Pages(context.Background()) {
 		break // this should trigget defer cancel() inside Pages iter

@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -19,24 +20,24 @@ import (
 type Page struct {
 	URL   *url.URL
 	Links []*url.URL
+	Err   error
 }
 
 type Config struct {
-	Client  *http.Client
-	Logger  *slog.Logger
-	Workers int
-	Max     int
-	Delay   time.Duration
+	Client    *http.Client
+	Logger    *slog.Logger
+	Workers   int
+	Delay     time.Duration
+	AllowList map[string]bool
 }
 
 type Crawler struct {
 	cfg     Config
-	seed    *url.URL
-	f       *frontier.Frontier
+	f       frontier.Frontier
 	limiter *rate.Limiter
 }
 
-func NewCrawler(cfg Config, seed *url.URL) *Crawler {
+func NewCrawler(cfg Config, f frontier.Frontier) *Crawler {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -47,15 +48,12 @@ func NewCrawler(cfg Config, seed *url.URL) *Crawler {
 		cfg.Delay = 20 * time.Millisecond
 	}
 
-	f := frontier.NewFrontier(cfg.Max)
-
 	limiter := rate.NewLimiter(rate.Every(cfg.Delay), 1)
 
 	return &Crawler{
 		cfg:     cfg,
-		seed:    seed,
-		f:       f,
 		limiter: limiter,
+		f:       f,
 	}
 }
 
@@ -73,16 +71,13 @@ func (c *Crawler) Pages(ctx context.Context) iter.Seq[Page] {
 }
 
 func (c *Crawler) run(ctx context.Context) <-chan Page {
-	c.cfg.Logger.Info("crawl started", "seed", c.seed.String())
+	context.AfterFunc(ctx, c.f.Close)
 
 	results := make(chan Page)
 
 	go func() {
 		defer close(results)
-		// Add the seed url so we can start the crawl
-		c.f.Enqueue(ctx, frontier.Task{URL: c.seed})
-		c.f.Watch()
-		pool.Run(ctx, c.cfg.Workers, c.f.Tasks(), func(t frontier.Task) {
+		pool.Run(c.cfg.Workers, c.f.Next, func(t frontier.Task) {
 			if p, ok := c.process(ctx, t); ok {
 				// If the context is cancelled stop pushing processed tasks.
 				// The consumer stopped receiving from results, so send
@@ -98,37 +93,30 @@ func (c *Crawler) run(ctx context.Context) <-chan Page {
 	return results
 }
 
-func (c *Crawler) Failures() int { return c.f.Failures() }
-
 func (c *Crawler) process(ctx context.Context, t frontier.Task) (Page, bool) {
 	c.cfg.Logger.Debug("fetching", "url", t.URL.String())
 	links, err := fetchAndParse(ctx, c.cfg.Client, c.limiter, t.URL)
 
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return Page{}, false // shutting down: not a real failure
+		}
 		c.cfg.Logger.Warn("fetch failed", "url", t.URL.String(), "err", err)
-		c.f.Fail()
-		return Page{}, false
+		c.f.Fail(t)
+		return Page{URL: t.URL, Err: err}, true
 	}
 
 	for _, l := range links {
-		if inScope(l, c.seed) {
-			c.f.Enqueue(ctx, frontier.Task{URL: l})
+		cu := frontier.Canonical(l)
+		if c.cfg.AllowList[cu.Host] {
+			c.f.Enqueue(frontier.Task{URL: cu})
 		}
 	}
 
 	c.cfg.Logger.Debug("page crawled", "url", t.URL.String(), "links", len(links))
-	c.f.Ack()
+	c.f.Ack(t)
+
 	return Page{URL: t.URL, Links: links}, true
-}
-
-func inScope(link *url.URL, seed *url.URL) bool {
-	// If it's external we don't want to crawl it
-	if link.Host != seed.Host {
-		return false
-	}
-
-	return true
-
 }
 
 func fetchAndParse(ctx context.Context, client *http.Client, limiter *rate.Limiter, pageURL *url.URL) ([]*url.URL, error) {

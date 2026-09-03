@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nicolaou-dev/web-crawler/internal/crawler"
+	"github.com/nicolaou-dev/web-crawler/internal/frontier"
 )
 
 const (
@@ -41,11 +42,12 @@ func main() {
 		Client:  client,
 		Logger:  logger,
 		Workers: workers,
-		Max:     maxPages,
 		Delay:   delay,
+		AllowList: map[string]bool{
+			seedURL.Host:          true,
+			"www." + seedURL.Host: true,
+		},
 	}
-
-	c := crawler.NewCrawler(config, seedURL)
 
 	start := time.Now()
 	pages := 0
@@ -59,7 +61,20 @@ func main() {
 	// and stops the OS process. Without it we would be forced to use
 	// kill -9
 	go func() { <-ctx.Done(); stop() }()
+
+	f := frontier.NewInMemory(seedURL, maxPages)
+	defer f.Close()
+
+	c := crawler.NewCrawler(config, f)
+
+	logger.Info("crawl started", "seed", seedURL.String())
+
+	failures := map[string]error{}
 	for p := range c.Pages(ctx) {
+		if p.Err != nil {
+			failures[p.URL.String()] = p.Err
+			continue
+		}
 		pages++
 		fmt.Println(p.URL)
 		for _, l := range p.Links {
@@ -69,7 +84,7 @@ func main() {
 
 	logger.Info("crawl finished",
 		"pages", pages,
-		"failures", c.Failures(),
+		"failures", failures,
 		"duration", time.Since(start),
 	)
 }

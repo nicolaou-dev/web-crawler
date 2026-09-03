@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/nicolaou-dev/web-crawler/internal/frontier"
 )
 
 func TestCrawl(t *testing.T) {
@@ -55,12 +56,14 @@ func TestCrawl(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	cfg := Config{
-		Client: srv.Client(),
-	}
-
 	seed, _ := url.Parse(srv.URL)
-	c := NewCrawler(cfg, seed)
+	cfg := Config{
+		Client:    srv.Client(),
+		AllowList: map[string]bool{seed.Host: true},
+	}
+	f := frontier.NewInMemory(seed, 0)
+	defer f.Close()
+	c := NewCrawler(cfg, f)
 	pages := slices.Collect(c.Pages(context.Background()))
 
 	want := map[string][]string{
@@ -109,13 +112,15 @@ func TestCrawlMaxTerminates(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	cfg := Config{
-		Client: srv.Client(),
-		Max:    10,
-	}
 	seed, _ := url.Parse(srv.URL)
+	cfg := Config{
+		Client:    srv.Client(),
+		AllowList: map[string]bool{seed.Host: true},
+	}
 
-	c := NewCrawler(cfg, seed)
+	f := frontier.NewInMemory(seed, 10)
+	defer f.Close()
+	c := NewCrawler(cfg, f)
 	pages := slices.Collect(c.Pages(context.Background()))
 
 	if len(pages) != 10 {
@@ -140,11 +145,24 @@ func TestCrawlNon2xxIsFailure(t *testing.T) {
 
 	seed, _ := url.Parse(srv.URL)
 
-	c := NewCrawler(Config{Client: srv.Client()}, seed)
-	pages := slices.Collect(c.Pages(context.Background()))
+	f := frontier.NewInMemory(seed, 0)
+	defer f.Close()
+	c := NewCrawler(Config{
+		Client:    srv.Client(),
+		AllowList: map[string]bool{seed.Host: true},
+	}, f)
 
-	if c.Failures() != 1 {
-		t.Errorf("failures = %d, want 1", c.Failures())
+	failures := 0
+	var pages []Page
+	for p := range c.Pages(context.Background()) {
+		if p.Err != nil {
+			failures++
+			continue
+		}
+		pages = append(pages, p)
+	}
+	if failures != 1 {
+		t.Errorf("failures = %d, want 1", failures)
 	}
 
 	if len(pages) != 2 {

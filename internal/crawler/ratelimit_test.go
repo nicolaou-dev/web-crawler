@@ -9,6 +9,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/nicolaou-dev/web-crawler/internal/frontier"
 )
 
 // The rate limiter must pace requests regardless of worker count. With a fake
@@ -32,11 +34,18 @@ func TestCrawlRespectsRateLimit(t *testing.T) {
 	defer srv.Close()
 
 	seed, _ := url.Parse(srv.URL)
+	f := frontier.NewInMemory(seed, 0)
+	defer f.Close()
 	// Assuming 1 ms per request (given it's instant here)
 	// 10 workers gives 10 / 0.001 = 10000 concurrent requests/s
 	// which is deliberately more than the rate (5 req/ s) to prove that
 	// workers do not bypass the limiter
-	c := NewCrawler(Config{Client: srv.Client(), Workers: 10, Delay: 200 * time.Millisecond}, seed)
+	c := NewCrawler(Config{
+		Client:    srv.Client(),
+		Workers:   10,
+		Delay:     200 * time.Millisecond,
+		AllowList: map[string]bool{seed.Host: true},
+	}, f)
 
 	start := time.Now()
 	pages := slices.Collect(c.Pages(context.Background()))
